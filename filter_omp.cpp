@@ -3,28 +3,26 @@
 #include <vector>
 #include <string>
 #include <omp.h>
+#include <chrono>
 
-// clampValue: asegura que un valor entero se encuentre dentro de un rango [minVal, maxVal].
-// Esto se usa para evitar que los valores de los píxeles se salgan del rango válido.
+using namespace std;
+
 inline int clampValue(int val, int minVal, int maxVal) {
     if (val < minVal) return minVal;
     if (val > maxVal) return maxVal;
     return val;
 }
 
-// La clase Image representa una imagen en memoria.
-// Contiene sus metadatos (tipo P2/P3, ancho, alto, valor máximo de color) y los píxeles.
 class Image {
 public:
-    std::string magic;
+    string magic;
     int width, height, maxColor;
-    std::vector<int> pixels;
+    vector<int> pixels;
 
-    // load: carga una imagen desde un archivo .pgm o .ppm en memoria
-    bool load(const std::string& filename) {
-        std::ifstream in(filename.c_str());
+    bool load(const string& filename) {
+        ifstream in(filename.c_str());
         if (!in.is_open()) {
-            std::cerr << "Error abriendo archivo: " << filename << "\n";
+            cerr << "Error abriendo archivo: " << filename << "\n";
             return false;
         }
         in >> magic >> width >> height >> maxColor;
@@ -34,11 +32,10 @@ public:
         return true;
     }
 
-    // save: guarda una imagen desde memoria a un archivo .pgm o .ppm
-    bool save(const std::string& filename) {
-        std::ofstream out(filename.c_str());
+    bool save(const string& filename) {
+        ofstream out(filename.c_str());
         if (!out.is_open()) {
-            std::cerr << "Error guardando archivo: " << filename << "\n";
+            cerr << "Error guardando archivo: " << filename << "\n";
             return false;
         }
         out << magic << "\n" << width << " " << height << "\n" << maxColor << "\n";
@@ -49,30 +46,23 @@ public:
     }
 };
 
-// Clase padre Filter
 class Filter {
 public:
-    // aplicar: función virtual pura que cada filtro debe implementar
     virtual void aplicar(const Image& input, Image& output) = 0;
     virtual ~Filter() {}
 };
 
-// Clase Padre ConvolutionFilter: implementa filtros de convolución
 class ConvolutionFilter : public Filter {
 protected:
-    std::vector<std::vector<float> > kernel;
+    vector<vector<float>> kernel;
 public:
-    ConvolutionFilter(const std::vector<std::vector<float> >& k) : kernel(k) {}
-
-    // aplicar: aplica el kernel sobre toda la imagen
+    ConvolutionFilter(const vector<vector<float>>& k) : kernel(k) {}
     void aplicar(const Image& input, Image& output) {
         output = input;
         int channels = (input.magic == "P3") ? 3 : 1;
         int kw = kernel[0].size();
-        int kh = kernel.size();
         int half = kw / 2;
 
-        // Directiva OpenMP para paralelizar los bucles anidados
         #pragma omp parallel for collapse(2)
         for (int y = 0; y < input.height; y++) {
             for (int x = 0; x < input.width; x++) {
@@ -96,7 +86,6 @@ public:
     }
 };
 
-// Filtro Blur
 class BlurFilter : public ConvolutionFilter {
 public:
     BlurFilter() : ConvolutionFilter({
@@ -106,7 +95,6 @@ public:
     }) {}
 };
 
-// Filtro Laplaciano
 class LaplaceFilter : public ConvolutionFilter {
 public:
     LaplaceFilter() : ConvolutionFilter({
@@ -116,7 +104,6 @@ public:
     }) {}
 };
 
-// Filtro Sharpen
 class SharpenFilter : public ConvolutionFilter {
 public:
     SharpenFilter() : ConvolutionFilter({
@@ -126,31 +113,57 @@ public:
     }) {}
 };
 
-
 int main(int argc, char* argv[]) {
-
-
-    Image img, result;
-    // load: carga una imagen desde un archivo .pgm o .ppm en memoria
-    if (!img.load(argv[1])) return 1;
-    result = img;
-
-    std::string filterArg = argv[3];
-    Filter* filter = NULL;
-
-    // Seleccionar filtro según el argumento
-    if (filterArg == "blur") filter = new BlurFilter();
-    else if (filterArg == "laplace") filter = new LaplaceFilter();
-    else if (filterArg == "sharpen") filter = new SharpenFilter();
-    else {
-        std::cerr << "Filtro no creado: " << filterArg << "\n";
+    if (argc < 2) {
+        cerr << "Uso: " << argv[0] << " input.ppm\n";
         return 1;
     }
 
-    filter->aplicar(img, result);
-    
-    result.save(argv[2]);
+    Image img;
+    if (!img.load(argv[1])) return 1;
 
-    delete filter;
+    Image resultBlur, resultLaplace, resultSharpen;
+
+    auto totalStart = chrono::high_resolution_clock::now();
+
+    // Se ejecutan los 3 filtros en paralelo con OpenMP sections
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        {
+            auto start = chrono::high_resolution_clock::now();
+            BlurFilter blur;
+            blur.aplicar(img, resultBlur);
+            auto end = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = end - start;
+            cout << "Tiempo Blur: " << elapsed.count() << " s\n";
+            resultBlur.save("out_blur.ppm");
+        }
+        #pragma omp section
+        {
+            auto start = chrono::high_resolution_clock::now();
+            LaplaceFilter laplace;
+            laplace.aplicar(img, resultLaplace);
+            auto end = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = end - start;
+            cout << "Tiempo Laplace: " << elapsed.count() << " s\n";
+            resultLaplace.save("out_laplace.ppm");
+        }
+        #pragma omp section
+        {
+            auto start = chrono::high_resolution_clock::now();
+            SharpenFilter sharp;
+            sharp.aplicar(img, resultSharpen);
+            auto end = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = end - start;
+            cout << "Tiempo Sharpen: " << elapsed.count() << " s\n";
+            resultSharpen.save("out_sharpen.ppm");
+        }
+    }
+
+    auto totalEnd = chrono::high_resolution_clock::now();
+    chrono::duration<double> totalElapsed = totalEnd - totalStart;
+    cout << "Tiempo total de ejecución: " << totalElapsed.count() << " s\n";
+
     return 0;
 }

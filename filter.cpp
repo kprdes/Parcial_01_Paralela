@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <memory>
+#include <chrono>
 
 using namespace std;
 
@@ -145,7 +146,7 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-
+    auto start = chrono::high_resolution_clock::now(); // Inicia el cronómetro
     Image img, result;
     if (!img.load(argv[1])) return 1;
 
@@ -164,7 +165,9 @@ int main(int argc, char* argv[]) {
     filter->aplicar(img, result);
 
     result.save(argv[2]);
-
+    auto end = chrono::high_resolution_clock::now(); // Detiene el cronómetro
+    chrono::duration<double> elapsed = end - start;
+    cout << "Tiempo de ejecución: " << elapsed.count() << " segundos" << endl;
     delete filter;
     return 0;
 }
